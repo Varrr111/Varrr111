@@ -381,3 +381,7 @@ async def set_cooldown(interaction: discord.Interaction, seconds: int):
         color=discord.Color.green()
     )
     await interaction.response.send_message(embed=embed)
+
+
+#запуск
+bot.run(TOKEN)
