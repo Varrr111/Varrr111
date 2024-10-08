@@ -3,12 +3,11 @@ from discord.ext import commands
 
 # Создаем объект бота с интентами
 intents = discord.Intents.default()
-intents.members = True
 intents.message_content = True
 
 class MyBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(command_prefix="*", intents=intents)
 
     async def setup_hook(self):
         await self.tree.sync()
@@ -19,240 +18,362 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# Хранилище данных о фракциях, странах, альянсах, войнах, технологиях и территориях
-factions = {}
-countries = {}
-alliances = {}
-wars = {}
-technologies = {}
-territories = {}
-armies = {}
-spies = {}
-ranks = ['Генерал', 'Министр', 'Советник', 'Офицер']
+# Хранилище данных
+user_balances = {}
+shop_items = {
+    "Меч": 100,
+    "Щит": 150,
+    "Зелье": 50
+}
+user_inventories = {}  # Хранилище инвентарей пользователей
+COOLDOWN_TIME = 60  # Время кулдауна для команды collect
+currency_symbol = "💵"  # Начальный символ валюты
 
-### Фракции ###
+### Команды ###
 
-@bot.tree.command(name="faction_info", description="Показать информацию о фракции")
-async def faction_info(interaction: discord.Interaction, faction: str):
-    if faction not in factions:
-        await interaction.response.send_message(f"❌ Фракция `{faction}` не найдена.")
-    else:
-        leader = factions[faction]["leader"]
-        resources = factions[faction]["resources"]
-        embed = discord.Embed(
-            title=f"📜 Информация о фракции: {faction}",
-            color=discord.Color.purple()
-        )
-        embed.add_field(name="👑 Лидер", value=leader, inline=False)
-        embed.add_field(name="💰 Ресурсы", value=f"{resources}", inline=False)
-        embed.set_footer(text="Информация о фракции", icon_url="https://example.com/icon.png")
-        await interaction.response.send_message(embed=embed)
+@bot.tree.command(name="collect", description="Собрать деньги (с кулдауном)")
+@commands.cooldown(1, COOLDOWN_TIME, commands.BucketType.user)
+async def collect(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    if user_id not in user_balances:
+        user_balances[user_id] = 0  # Инициализируем баланс, если его нет
 
-@bot.tree.command(name="list_factions", description="Показать список всех фракций")
-async def list_factions(interaction: discord.Interaction):
-    if not factions:
-        await interaction.response.send_message("📜 Список фракций пуст.")
-    else:
-        factions_list = "\n".join([f"🔹 {name}" for name in factions.keys()])
-        embed = discord.Embed(
-            title="🌍 Список фракций",
-            description=factions_list,
-            color=discord.Color.green()
-        )
-        embed.set_footer(text="Выберите фракцию для подробной информации")
-        await interaction.response.send_message(embed=embed)
+    earnings = 100  # Сумма, которую игрок получает при сборе
+    user_balances[user_id] += earnings
 
-@bot.tree.command(name="create_faction", description="Создать новую фракцию")
-async def create_faction(interaction: discord.Interaction, faction: str, leader: str, resources: int):
-    if faction in factions:
-        await interaction.response.send_message(f"⚠️ Фракция {faction} уже существует.")
-    else:
-        factions[faction] = {"leader": leader, "resources": resources}
-        embed = discord.Embed(
-            title="✅ Фракция создана!",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="🏴 Фракция", value=faction, inline=False)
-        embed.add_field(name="👑 Лидер", value=leader, inline=False)
-        embed.add_field(name="💰 Ресурсы", value=resources, inline=False)
-        embed.set_thumbnail(url="https://example.com/faction.png")
-        await interaction.response.send_message(embed=embed)
+    embed = discord.Embed(
+        title="💰 Сбор средств",
+        description=f"Вы собрали {earnings} монет!",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Ваш текущий баланс:", value=f"{user_balances[user_id]} монет", inline=False)
+    await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="delete_faction", description="Удалить фракцию")
-async def delete_faction(interaction: discord.Interaction, faction: str):
-    if faction not in factions:
-        await interaction.response.send_message(f"❌ Фракция {faction} не найдена.")
-    else:
-        del factions[faction]
-        embed = discord.Embed(
-            title="🗑️ Фракция удалена",
-            description=f"Фракция **{faction}** была удалена.",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed)
+@bot.tree.command(name="balance", description="Показать баланс игрока")
+async def balance(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    balance = user_balances.get(user_id, 0)
 
-### Страны ###
+    embed = discord.Embed(
+        title="📊 Ваш баланс",
+        description=f"Ваш текущий баланс: {balance} {currency_symbol}.",
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="register_country", description="Зарегистрировать новую страну за игроком")
-async def register_country(interaction: discord.Interaction, player: discord.Member, country: str, ideology: discord.Role, iron: str, oil: str, uranium: str, coal: str):
-    if country in countries:
-        await interaction.response.send_message(f"⚠️ Страна {country} уже существует.")
+@bot.tree.command(name="shop", description="Показать товары в магазине")
+async def shop(interaction: discord.Interaction):
+    if not shop_items:
+        await interaction.response.send_message("🛒 Магазин пуст.")
         return
 
-    # Регистрация страны
-    countries[country] = {
-        "player": player.name,
-        "ideology": ideology,
-        "resources": {
-            "iron": iron,
-            "oil": oil,
-            "uranium": uranium,
-            "coal": coal
-        }
-    }
-
-    # Выдача ролей
-    if iron.lower() == "yes":
-        await player.add_roles(discord.utils.get(interaction.guild.roles, id=IRON_ROLE_ID))  # Замените на ID роли для железа
-    if oil.lower() == "yes":
-        await player.add_roles(discord.utils.get(interaction.guild.roles, id=OIL_ROLE_ID))  # Замените на ID роли для нефти
-    if uranium.lower() == "yes":
-        await player.add_roles(discord.utils.get(interaction.guild.roles, id=URANIUM_ROLE_ID))  # Замените на ID роли для урана
-    if coal.lower() == "yes":
-        await player.add_roles(discord.utils.get(interaction.guild.roles, id=COAL_ROLE_ID))  # Замените на ID роли для угля
-
-    # Создание ответа
+    shop_list = "\n".join([f"**{item}**: {price} {currency_symbol}" for item, price in shop_items.items()])
     embed = discord.Embed(
-        title="🌟 Страна зарегистрирована!",
-        color=discord.Color.green()
+        title="🛒 Магазин",
+        description=shop_list,
+        color=discord.Color.gold()
     )
-    embed.add_field(name="🏳️ Страна", value=country, inline=False)
-    embed.add_field(name="👤 Игрок", value=player.name, inline=True)
-    embed.add_field(name="📜 Идеология", value=ideology.name, inline=True)
-    embed.add_field(name="⛏️ Ресурсы", value=f"Железо: {iron}, Нефть: {oil}, Уран: {uranium}, Уголь: {coal}", inline=False)
-    embed.set_thumbnail(url="https://example.com/country.png")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="list_countries", description="Показать список всех стран")
-async def list_countries(interaction: discord.Interaction):
-    if not countries:
-        await interaction.response.send_message("📜 Список стран пуст.")
-    else:
-        countries_list = "\n".join([f"🌍 {name}" for name in countries.keys()])
-        embed = discord.Embed(
-            title="🌍 Список стран",
-            description=countries_list,
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="Выберите страну для получения информации")
-        await interaction.response.send_message(embed=embed)
+# Команда инвентаря
+@bot.tree.command(name="inventory", description="Показать инвентарь игрока")
+async def inventory(interaction: discord.Interaction):
+    user_id = interaction.user.id
 
-@bot.tree.command(name="delete_country", description="Удалить страну")
-async def delete_country(interaction: discord.Interaction, country: str):
-    if country not in countries:
-        await interaction.response.send_message(f"❌ Страна {country} не найдена.")
-    else:
-        del countries[country]
-        embed = discord.Embed(
-            title="🗑️ Страна удалена",
-            description=f"Страна **{country}** была удалена.",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed)
+    # Получаем инвентарь пользователя
+    inventory = user_inventories.get(user_id, {})
 
-@bot.tree.command(name="collect_resources", description="Собрать ресурсы для страны")
-async def collect_resources(interaction: discord.Interaction, country: str):
-    if country not in countries:
-        await interaction.response.send_message(f"❌ Страна {country} не найдена.")
-    else:
-        collected_resources = countries[country]["resources"]["iron"] + 100  # Пример начисления ресурсов
-        countries[country]["resources"]["iron"] = collected_resources
-        embed = discord.Embed(
-            title="💰 Ресурсы собраны!",
-            description=f"Ресурсы для страны **{country}** собраны. Новое количество ресурсов: **{collected_resources}**.",
-            color=discord.Color.gold()
-        )
-        await interaction.response.send_message(embed=embed)
+    if not inventory:
+        await interaction.response.send_message("🗃️ Ваш инвентарь пуст.")
+        return
 
-### Дипломатия и Альянсы ###
+    # Формируем строку с количеством предметов
+    inventory_list = "\n".join([f"{count} - {item}" for item, count in inventory.items()])
 
-@bot.tree.command(name="create_alliance", description="Создать альянс между двумя странами")
-async def create_alliance(interaction: discord.Interaction, country1: str, country2: str, name: str):
-    if country1 not in countries or country2 not in countries:
-        await interaction.response.send_message("❌ Одна из стран не найдена.")
-    else:
-        alliances[name] = [country1, country2]
-        embed = discord.Embed(
-            title="🤝 Альянс создан!",
-            description=f"Альянс **{name}** создан между **{country1}** и **{country2}**.",
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="Сила в единстве!")
-        await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="break_alliance", description="Разорвать альянс")
-async def break_alliance(interaction: discord.Interaction, name: str):
-    if name not in alliances:
-        await interaction.response.send_message(f"❌ Альянс {name} не найден.")
-    else:
-        del alliances[name]
-        embed = discord.Embed(
-            title="✂️ Альянс разорван",
-            description=f"Альянс **{name}** был разорван.",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="war", description="Объявить войну одной или нескольким странам")
-async def declare_war(interaction: discord.Interaction, countries_list: str):
-    countries_to_war = countries_list.split(',')
-    for country in countries_to_war:
-        if country.strip() not in countries:
-            await interaction.response.send_message(f"❌ Страна {country.strip()} не найдена.")
-            return
-
-    # Добавление стран в список войн
-    wars[interaction.user.name] = countries_to_war
     embed = discord.Embed(
-        title="⚔️ Объявление войны!",
-        description=f"Объявлена война странам: {', '.join(countries_to_war)}.",
+        title="🗃️ Ваш инвентарь",
+        description=inventory_list,
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed)
+
+# Создать предмет
+@bot.tree.command(name="create_item", description="Создать новый предмет")
+async def create_item(interaction: discord.Interaction, name: str, price: int, description: str):
+    # Создаем новый предмет в магазине
+    shop_items[name] = price
+
+    # Выводим сообщение о успешном создании
+    embed = discord.Embed(
+        title="✅ Предмет создан!",
+        description=f"Вы создали предмет **{name}** за **{price} монет**.\nОписание: {description}",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
+
+# Удалить предмет
+@bot.tree.command(name="delete_item", description="Удалить предмет из магазина")
+async def delete_item(interaction: discord.Interaction, item: str):
+    # Проверяем, есть ли предмет в магазине
+    if item not in shop_items:
+        await interaction.response.send_message(f"❌ Товар `{item}` не найден в магазине.")
+        return
+
+    # Удаляем предмет из магазина
+    del shop_items[item]
+
+    embed = discord.Embed(
+        title="🗑️ Удаление товара",
+        description=f"Предмет `{item}` был удален из магазина.",
         color=discord.Color.red()
     )
     await interaction.response.send_message(embed=embed)
 
-### Модераторские команды ###
-
-@bot.tree.command(name="clear", description="Очистить сообщения в канале")
-@commands.has_permissions(manage_messages=True)
-async def clear_messages(interaction: discord.Interaction, amount: int):
-    await interaction.channel.purge(limit=amount)
+# Изменение валюты
+@bot.tree.command(name="set_currency", description="Изменить символ валюты")
+async def set_currency(interaction: discord.Interaction, symbol: str):
+    global currency_symbol
+    currency_symbol = symbol
     embed = discord.Embed(
-        title="🧹 Очистка завершена!",
-        description=f"Удалено сообщений: {amount}.",
+        title="💰 Символ валюты изменен!",
+        description=f"Новый символ валюты: {currency_symbol}",
         color=discord.Color.green()
     )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="mute", description="Замьютить пользователя")
-@commands.has_permissions(manage_roles=True)
-async def mute_user(interaction: discord.Interaction, member: discord.Member):
-    role = discord.utils.get(interaction.guild.roles, name="Muted")  # Замените на имя вашей роли мьют
-    await member.add_roles(role)
+# Новая команда для покупки товаров
+@bot.tree.command(name="buy", description="Купить товар в магазине")
+async def buy(interaction: discord.Interaction, item: str, quantity: int = 1):
+    user_id = interaction.user.id
+    if user_id not in user_balances:
+        user_balances[user_id] = 0  # Инициализируем баланс, если его нет
+
+    if item not in shop_items:
+        await interaction.response.send_message(f"❌ Товар `{item}` не найден в магазине.")
+        return
+
+    price = shop_items[item]  # Получаем цену товара
+    total_cost = price * quantity
+
+    if user_balances[user_id] < total_cost:
+        await interaction.response.send_message(f"❌ У вас недостаточно денег для покупки {quantity} единиц товара `{item}`.")
+        return
+
+    # Списываем деньги
+    user_balances[user_id] -= total_cost
+
+    # Добавляем товар в инвентарь пользователя
+    if user_id not in user_inventories:
+        user_inventories[user_id] = {}
+    
+    if item in user_inventories[user_id]:
+        user_inventories[user_id][item] += quantity  # Увеличиваем количество
+    else:
+        user_inventories[user_id][item] = quantity  # Добавляем новый предмет
+
     embed = discord.Embed(
-        title="🔇 Пользователь замучен!",
-        description=f"{member.mention} был замучен.",
+        title="✅ Покупка успешна!",
+        description=f"Вы купили {quantity} единиц товара `{item}` за {total_cost} {currency_symbol}.",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Ваш текущий баланс:", value=f"{user_balances[user_id]} {currency_symbol}", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+# Использовать предмет
+@bot.tree.command(name="use_item", description="Использовать предмет из инвентаря")
+async def use_item(interaction: discord.Interaction, item: str, quantity: int = 1):
+    user_id = interaction.user.id
+
+    if user_id not in user_inventories or item not in user_inventories[user_id]:
+        await interaction.response.send_message(f"❌ У вас нет предмета `{item}` в инвентаре.")
+        return
+
+    # Подсчитаем, сколько предметов у пользователя
+    item_count = user_inventories[user_id].get(item, 0)
+
+    if item_count < quantity:
+        await interaction.response.send_message(f"❌ У вас недостаточно предметов `{item}` для использования {quantity} раз.")
+        return
+
+    # Убираем нужное количество предметов из инвентаря
+    user_inventories[user_id][item] -= quantity
+    if user_inventories[user_id][item] == 0:
+        del user_inventories[user_id][item]  # Удаляем предмет, если количество стало 0
+
+    embed = discord.Embed(
+        title="✅ Использование предмета",
+        description=f"Вы использовали {quantity} предметов `{item}`.",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Ваш инвентарь", value=", ".join([f"{count} - {name}" for name, count in user_inventories[user_id].items()]) or "Пусто", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+# Остальные команды
+
+@bot.tree.command(name="sell_item", description="Продать товар из инвентаря")
+async def sell_item(interaction: discord.Interaction, item: str):
+    user_id = interaction.user.id
+    if user_id not in user_balances:
+        user_balances[user_id] = 0  # Инициализируем баланс, если его нет
+
+    if user_id not in user_inventories or item not in user_inventories[user_id]:
+        await interaction.response.send_message(f"❌ У вас нет товара `{item}` для продажи.")
+        return
+
+    price = shop_items.get(item, 50)  # Продаем по половине или фиксированной цене
+    user_balances[user_id] += price
+    user_inventories[user_id].remove(item)
+
+    embed = discord.Embed(
+        title="✅ Продажа успешна!",
+        description=f"Вы продали `{item}` за {price} монет.",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Ваш текущий баланс:", value=f"{user_balances[user_id]} монет", inline=False)
+    embed.add_field(name="Ваш инвентарь", value=", ".join(user_inventories[user_id]) or "Пусто", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+# Добавляем деньги любому игроку
+@bot.tree.command(name="add_money", description="Добавить деньги игроку")
+async def add_money(interaction: discord.Interaction, player: discord.Member, amount: int):
+    user_id = player.id
+    if user_id not in user_balances:
+        user_balances[user_id] = 0  # Инициализируем баланс, если его нет
+
+    user_balances[user_id] += amount
+    embed = discord.Embed(
+        title="✅ Деньги добавлены!",
+        description=f"Вы добавили {amount} монет игроку {player.mention}.",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Текущий баланс игрока", value=f"{user_balances[user_id]} монет", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="remove_money", description="Удалить деньги у игрока")
+async def remove_money(interaction: discord.Interaction, amount: int):
+    user_id = interaction.user.id
+    if user_id not in user_balances:
+        user_balances[user_id] = 0  # Инициализируем баланс, если его нет
+
+    if user_balances[user_id] < amount:
+        await interaction.response.send_message("❌ У вас недостаточно денег для удаления этой суммы.")
+        return
+
+    user_balances[user_id] -= amount
+    embed = discord.Embed(
+        title="✅ Деньги удалены!",
+        description=f"Вы удалили {amount} монет. Ваш текущий баланс: {user_balances[user_id]} монет.",
         color=discord.Color.red()
     )
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="unmute", description="Размьютить пользователя")
-@commands.has_permissions(manage_roles=True)
-async def unmute_user(interaction: discord.Interaction, member: discord.Member):
-    role = discord.utils.get(interaction.guild.roles, name="Muted")  # Замените на имя вашей роли мьют
-    await member.remove_roles(role)
+@bot.tree.command(name="leaderboard", description="Показать рейтинг игроков")
+async def leaderboard(interaction: discord.Interaction):
+    sorted_balances = sorted(user_balances.items(), key=lambda x: x[1], reverse=True)
+    leaderboard_list = "\n".join([f"<@{user_id}>: {balance} монет" for user_id, balance in sorted_balances])
     embed = discord.Embed(
-        title="🔊 Пользователь размучен!",
-        description=f"{member.mention} был размучен.",
+        title="🏆 Рейтинг игроков",
+        description=leaderboard_list or "Пока нет игроков.",
+        color=discord.Color.gold()
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="reset_money", description="Сбросить деньги игрока")
+async def reset_money(interaction: discord.Interaction, player: discord.Member):
+    user_id = player.id
+    user_balances[user_id] = 0
+    embed = discord.Embed(
+        title="✅ Деньги сброшены!",
+        description=f"Деньги игрока <@{user_id}> были сброшены.",
+        color=discord.Color.red()
+    )
+    await interaction.response.send_message(embed=embed)
+#бан
+@bot.tree.command(name="ban", description="Забанить пользователя")
+@commands.has_permissions(ban_members=True)  # Убедитесь, что у вызывающего команду есть права на бан
+async def ban(interaction: discord.Interaction, user: discord.Member, reason: str = "Причина не указана"):
+    try:
+        await user.ban(reason=reason)
+        embed = discord.Embed(
+            title="🚫 Пользователь забанен",
+            description=f"Пользователь {user.mention} был забанен.\nПричина: {reason}",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ У меня нет прав на бан этого пользователя.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Произошла ошибка: {str(e)}", ephemeral=True)
+
+# разбан
+@bot.tree.command(name="unban", description="Разбанить пользователя")
+@commands.has_permissions(ban_members=True)  # Убедитесь, что у вызывающего команду есть права на разбан
+async def unban(interaction: discord.Interaction, user_id: int):
+    try:
+        user = await bot.fetch_user(user_id)
+        await interaction.guild.unban(user)
+        embed = discord.Embed(
+            title="✅ Пользователь разбанен",
+            description=f"Пользователь {user.mention} был разбанен.",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
+    except discord.NotFound:
+        await interaction.response.send_message("❌ Пользователь с таким ID не найден или не забанен.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Произошла ошибка: {str(e)}", ephemeral=True)
+
+#мьют и размьют
+@bot.tree.command(name="mute", description="Мьютит пользователя на определенное время")
+async def mute(interaction: discord.Interaction, member: discord.Member, duration: int):
+    try:
+        # Мьютим пользователя
+        await member.timeout(duration=discord.utils.utcnow() + discord.timedelta(seconds=duration))
+        embed = discord.Embed(
+            title="🔇 Мьют",
+            description=f"{member.mention} был замьючен на {duration} секунд.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Не удалось замьютить пользователя. Ошибка: {e}")
+
+@bot.tree.command(name="unmute", description="Размьютит пользователя")
+async def unmute(interaction: discord.Interaction, member: discord.Member):
+    try:
+        # Размьютим пользователя
+        await member.timeout(None)
+        embed = discord.Embed(
+            title="🔊 Размьют",
+            description=f"{member.mention} был размьючен.",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Не удалось размьютить пользователя. Ошибка: {e}")
+
+#деньги роль
+@bot.tree.command(name="role_income", description="Установить доход от роли")
+async def role_income(interaction: discord.Interaction, role: discord.Role, amount: int):
+    for member in role.members:
+        if member.id not in user_balances:
+            user_balances[member.id] = 0  # Инициализируем баланс, если его нет
+        user_balances[member.id] += amount
+
+    embed = discord.Embed(
+        title="✅ Доход добавлен!",
+        description=f"Доход в размере {amount} монет был добавлен всем участникам роли `{role.name}`.",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="set_cooldown", description="Установить кулдаун для команды collect")
+async def set_cooldown(interaction: discord.Interaction, seconds: int):
+    global COOLDOWN_TIME
+    COOLDOWN_TIME = seconds
+    embed = discord.Embed(
+        title="⏳ Кулдаун установлен!",
+        description=f"Кулдаун для команды collect установлен на {seconds} секунд.",
         color=discord.Color.green()
     )
     await interaction.response.send_message(embed=embed)
