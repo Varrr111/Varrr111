@@ -1,5 +1,9 @@
 import discord
+import os
 from discord.ext import commands
+
+#токен
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Создаем объект бота с интентами
 intents = discord.Intents.default()
