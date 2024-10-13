@@ -1,9 +1,5 @@
 import discord
-import os
 from discord.ext import commands
-
-#токен
-TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Создаем объект бота с интентами
 intents = discord.Intents.default()
@@ -24,35 +20,82 @@ bot = MyBot()
 
 # Хранилище данных
 user_balances = {}
-shop_items = {
-    "Меч": 100,
-    "Щит": 150,
-    "Зелье": 50
-}
-user_inventories = {}  # Хранилище инвентарей пользователей
-COOLDOWN_TIME = 60  # Время кулдауна для команды collect
+role_income = {}  # Хранилище дохода от ролей
+role_cooldowns = {}  # Хранилище кулдаунов для ролей
+shop_items = {}  # Добавляем инициализацию магазина
 currency_symbol = "💵"  # Начальный символ валюты
 
 ### Команды ###
 
+@bot.tree.command(name="role_income_add", description="Установить доход от роли")
+async def role_income_add(interaction: discord.Interaction, role: discord.Role, amount: int, cooldown: int):
+    role_income[role.id] = amount
+    role_cooldowns[role.id] = cooldown * 3600  # Кулдаун в секундах (часы * 3600)
+    embed = discord.Embed(
+        title="✅ Доход от роли установлен!",
+        description=f"Роль **{role.name}** теперь дает **{amount}** монет с кулдауном в **{cooldown} часов**.",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="role_income_info", description="Показать информацию о доходах от ролей")
+async def role_income_info(interaction: discord.Interaction):
+    if not role_income:
+        await interaction.response.send_message("❌ Нет зарегистрированных ролей с доходом.")
+        return
+
+    embed_description = "Список ролей и их доходов:\n"
+    for role_id, amount in role_income.items():
+        role = interaction.guild.get_role(role_id)
+        if role:
+            embed_description += f"**{role.name}**: **{amount}** монет\n"
+
+    embed = discord.Embed(
+        title="📊 Информация о доходах от ролей",
+        description=embed_description,
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="collect", description="Собрать деньги (с кулдауном)")
-@commands.cooldown(1, COOLDOWN_TIME, commands.BucketType.user)
+@commands.cooldown(1, 60, commands.BucketType.user)
 async def collect(interaction: discord.Interaction):
     user_id = interaction.user.id
     if user_id not in user_balances:
         user_balances[user_id] = 0  # Инициализируем баланс, если его нет
 
-    earnings = 100  # Сумма, которую игрок получает при сборе
-    user_balances[user_id] += earnings
+    total_earnings = 0  # Переменная для хранения общей суммы дохода
+    embed_description = ""  # Строка для накопления описания доходов
+    can_collect = False  # Флаг, указывающий, можно ли собрать деньги
 
-    embed = discord.Embed(
-        title="💰 Сбор средств",
-        description=f"Вы собрали {earnings} монет!",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Ваш текущий баланс:", value=f"{user_balances[user_id]} монет", inline=False)
-    await interaction.response.send_message(embed=embed)
+    for role in interaction.user.roles:
+        if role.id in role_income:
+            # Проверяем кулдаун для данной роли
+            last_collected = role_cooldowns.get(role.id, 0)
+            if last_collected < (discord.utils.utcnow().timestamp() - role_cooldowns[role.id]):  # Проверка кулдауна
+                earnings = role_income[role.id]
+                total_earnings += earnings
+                embed_description += f"Роль: **{role.name}** - Сумма: **{earnings}** монет\n"
+                can_collect = True  # Можно собрать деньги
+                # Обновляем время последнего сбора для этой роли
+                role_cooldowns[role.id] = discord.utils.utcnow().timestamp()
 
+    if total_earnings > 0:
+        user_balances[user_id] += total_earnings  # Добавляем общую сумму к балансу пользователя
+        embed = discord.Embed(
+            title="💰 Сбор средств",
+            description=embed_description,  # Теперь показывает все доходы
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Ваш текущий баланс:", value=f"{user_balances[user_id]} монет", inline=False)
+        await interaction.response.send_message(embed=embed)
+    elif not can_collect:
+        # Если нет ролей с доходом или все они на кулдаун
+        await interaction.response.send_message("❌ У вас нет ролей, которые дают доход, или кулдаун еще не истек для всех ролей.")
+    else:
+        await interaction.response.send_message("❌ Кулдаун для одной или нескольких ваших ролей еще не истек.")
+
+#баланс
 @bot.tree.command(name="balance", description="Показать баланс игрока")
 async def balance(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -356,21 +399,7 @@ async def unmute(interaction: discord.Interaction, member: discord.Member):
     except Exception as e:
         await interaction.response.send_message(f"❌ Не удалось размьютить пользователя. Ошибка: {e}")
 
-#деньги роль
-@bot.tree.command(name="role_income", description="Установить доход от роли")
-async def role_income(interaction: discord.Interaction, role: discord.Role, amount: int):
-    for member in role.members:
-        if member.id not in user_balances:
-            user_balances[member.id] = 0  # Инициализируем баланс, если его нет
-        user_balances[member.id] += amount
-
-    embed = discord.Embed(
-        title="✅ Доход добавлен!",
-        description=f"Доход в размере {amount} монет был добавлен всем участникам роли `{role.name}`.",
-        color=discord.Color.green()
-    )
-    await interaction.response.send_message(embed=embed)
-
+#кулдаун
 @bot.tree.command(name="set_cooldown", description="Установить кулдаун для команды collect")
 async def set_cooldown(interaction: discord.Interaction, seconds: int):
     global COOLDOWN_TIME
@@ -382,6 +411,4 @@ async def set_cooldown(interaction: discord.Interaction, seconds: int):
     )
     await interaction.response.send_message(embed=embed)
 
-
-#запуск
-bot.run(TOKEN)
+bot.run('Token')
